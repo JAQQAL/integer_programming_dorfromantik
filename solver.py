@@ -466,8 +466,7 @@ def solveProblem(d, size, tile_set, quests, name, segment_types=['gras','tree','
         #flow values for relevant scenarios. filled while iterating
         flow = {}
         
-        #variable to decribe connecting path problem: use or do not use EDGE for path to NODE
-        ut = m.addVars(nodes, edges, vtype=GRB.BINARY, name='u_q'+str(t))
+        
         
         #iterarting through all possible combinations
         #1) possible quest locations (start)
@@ -475,7 +474,7 @@ def solveProblem(d, size, tile_set, quests, name, segment_types=['gras','tree','
         for (si,sj,sk) in getReachableNodes(board,size,t):
             #1) nodes that could be connected to quest location (to)
             con_nodes = connectableNodes(board, size, d, si, sj, sk)
-            for (ti,tj,tk) in nodes:#con_nodes:
+            for (ti,tj,tk) in con_nodes:
                 
                 #generate flow values for path problem
                 for (ni,nj,nk) in nodes:
@@ -485,27 +484,38 @@ def solveProblem(d, size, tile_set, quests, name, segment_types=['gras','tree','
                         flow[si,sj,sk,ti,tj,tk,ni,nj,nk] = -1
                     else:
                         flow[si,sj,sk,ti,tj,tk,ni,nj,nk] = 0
+                
                 #formulation of a path problem using flow
                 if not (si == ti and sj == tj and sk == tk):
+                    
+                    rel_edges = relevantEdges(edges, con_nodes + [(si,sj,sk)])
+                    
+                    #variable to decribe connecting path problem: use or do not use EDGE for path to NODE
+                    ut = m.addVars(rel_edges, vtype=GRB.BINARY, name='u_q'+str(t)+'_('+str(ti)+','+str(tj)+','+str(tk)+')')
+                
                     #balance of incoming and outgoing flow
-                    for (ni,nj,nk) in nodes:#con_nodes:
-                        m.addConstr((combo[t,si,sj,sk,ti,tj,tk] == 1) >> (ut.sum(ti,tj,tk,ni,nj,nk,'*','*','*') - ut.sum(ti,tj,tk,'*','*','*',ni,nj,nk) == flow[si,sj,sk,ti,tj,tk,ni,nj,nk]))
+                    for (ni,nj,nk) in con_nodes:#nodes:
+                        m.addConstr((combo[t,si,sj,sk,ti,tj,tk] == 1) >> (ut.sum(ni,nj,nk,'*','*','*') - ut.sum('*','*','*',ni,nj,nk) == flow[si,sj,sk,ti,tj,tk,ni,nj,nk]))
         
                     #restriction to pick only one edge from quest location
-                    m.addConstr((combo[t,si,sj,sk,ti,tj,tk] == 1) >> (ut.sum(ti,tj,tk,si,sj,sk,'*','*','*') <= 1))
+                    m.addConstr((combo[t,si,sj,sk,ti,tj,tk] == 1) >> (ut.sum(si,sj,sk,'*','*','*') <= 1))
                     
                     #edges can only be used if they exist
-                    for (ni,nj,nk,nl,nm,nn) in edges:#relevantEdges(edges, con_nodes + [(si,sj,sk)]):
-                        m.addConstr((combo[t,si,sj,sk,ti,tj,tk] == 1) >> (ut[ti,tj,tk,ni,nj,nk,nl,nm,nn] <= conn[ni,nj,nk,nl,nm,nn]))
+                    for (ni,nj,nk,nl,nm,nn) in rel_edges:#edges:
+                        m.addConstr((combo[t,si,sj,sk,ti,tj,tk] == 1) >> (ut[ni,nj,nk,nl,nm,nn] <= conn[ni,nj,nk,nl,nm,nn]))
                     
                     '''
                     #at least one edge needs to be used
-                    m.addConstr((combo[t,si,sj,sk,ti,tj,tk] == 1) >> (1 <= ut.sum(ti,tj,tk,'*','*','*','*','*','*')))
+                    m.addConstr((combo[t,si,sj,sk,ti,tj,tk] == 1) >> (1 <= ut.sum('*','*','*','*','*','*')))
                     '''
                     
                     #currently in variable combo 
-                    #path exists
-                    m.addConstr((combo[t,si,sj,sk,ti,tj,tk] == 1) >> (ut.sum(ti,tj,tk,'*','*','*','*','*','*') <= len(edges) * u[t,ti,tj,tk]))
+                    #path does exist
+                    m.addConstr((combo[t,si,sj,sk,ti,tj,tk] == 1) >> (ut.sum('*','*','*','*','*','*') <= len(edges) * u[t,ti,tj,tk]))
+                    
+                    #currently in variable combo 
+                    #path does not exist
+                    m.addConstr((combo[t,si,sj,sk,ti,tj,tk] == 1) >> (u[t,ti,tj,tk] <= ut.sum(si,sj,sk,'*','*','*')))
                     
         #additional restriction based on the type of the quest
         #larger connected component w.r.t objects
@@ -563,6 +573,7 @@ def solveProblem(d, size, tile_set, quests, name, segment_types=['gras','tree','
 
     #plot segments position with connections
     solAsNetwork(nodes, edges, kind, conn, quant, size, dic, tag)
+
 
 '''Modelling and solving of the IP. STATE: not correct'''
 def solveProblemTest(d, size, tile_set, quests, name, segment_types=['gras','tree','corn','house','rail','water'], dic='output/', fixed_start=True):
